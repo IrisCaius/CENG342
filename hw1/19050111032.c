@@ -73,7 +73,7 @@ void printFile(char const* fileName, double* result, int row) {
     for (int i = 0; i < row; i++) {
         fprintf(out, "%f\n", result[i]);
     }
-    free(out);
+    fclose(out);
 }
 
 int main(int argc, char const *argv[]) {
@@ -104,6 +104,9 @@ int main(int argc, char const *argv[]) {
     printVector(result, row);
     printFile(argv[3], result, row);
     
+    free(matrix);
+    free(vector);
+    free(result);
     
     return 0;
 }

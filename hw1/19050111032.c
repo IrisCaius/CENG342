@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <mpi.h>
+#include </usr/lib/x86_64-linux-gnu/openmpi/include/mpi.h>
 #include <sys/time.h>
 
 double getTime() {
@@ -30,11 +30,11 @@ int isNumeric(char const *str) {
     return 1;
 }
 
-void asssign_random_numbers_to_matrix(double *matrix, int n, int r, int c) {
+void asssign_random_numbers_to_matrix(double *matrix, int r, int c) {
     /// @authors https://cboard.cprogramming.com/c-programming/17939-random-double-numbers-post114817.html#post114817
     for (int i = 0; i < r; i++) {
         for (int j = 0; j < c; j++) {
-            matrix[i*n + j] = ( (double)rand() * ( 10 -(-10) ) ) / (double)RAND_MAX + (-10);
+            matrix[i*r + j] = ( (double)rand() * ( 10 -(-10) ) ) / (double)RAND_MAX + (-10);
         }
     }
 }
@@ -66,71 +66,23 @@ void printVector(double* vector, int col) {
     printf("\n");
 }
 
-void matrix_vector_multiplication(double *matrix, double* vector, double* result, int n, int row, int col, int rank, int size) {
-    int low = (int) (rank * (double)row / (double)size);  
-    int high = (int) ((rank + 1) * (double)row / (double)size);
-    for (int i = low; i < high; i++) {
+void matrix_vector_multiplication(double *matrix, double *vector, double* result, int row, int col, int start_row) {
+    // printf("Start Row: %d, Row: %d\n", start_row, row);
+    for (int i = 0; i < row; i++) {
         double a = 0;
         for (int j = 0; j < col; j++) {
-            a += matrix[i*n + j] * vector[j];
+            a += matrix[i*row + j] * vector[j];
         }
-        result[i] = a;
+        result[start_row + i] = a;
     }
 }
 
-void printFile(char const* fileName, double* result1, double *result2, int n1, int n2) {
+void printFile(char const* fileName, double* result, int n1, int n2) {
     FILE *out = fopen(fileName, "w");
     for (int i = 0; i < n1; i++) {
-        fprintf(out, "%f\n", result1[i]);
-    }
-    fprintf(out, "\n------------------\n");
-    for (int i = 0; i < n2; i++) {
-        fprintf(out, "%f\n", result2[i]);
+        fprintf(out, "%f\n", result[i]);
     }
     fclose(out);
-}
-
-void parallel_matrix_vector_multiplication(double *matrix, double *vector, double *result, int n, int rank, int size) {
-    if ( rank == 0 ) {
-        asssign_random_numbers_to_matrix(matrix, n, n, n);
-        asssign_random_numbers_to_vector(vector, n);
-        
-        // Send generated matrixes and vectors to the other processes
-        for (int i = 1; i < size; i++) {
-            MPI_Send(matrix, n*n, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-            MPI_Send(vector, n, MPI_DOUBLE, i, 1, MPI_COMM_WORLD);
-        }
-        
-        // Calculate matrix vector multiplication for process 0's area
-        matrix_vector_multiplication(matrix, vector, result, n, n, n, rank, size);
-        
-        for (int i = 1; i < size; i++) {
-            double local_result[n];
-            
-            // Receiving other process' results
-            MPI_Recv(local_result, n, MPI_DOUBLE, i, i * 100 + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            
-            // Assigning other process' results to process 0's result
-            int low = (int) (i * (double)n / (double)size);  
-            int high = (int) ((i + 1) * (double)n / (double)size);
-            for (int i = low; i < high; i++) {
-                result[i] = local_result[i];
-            }
-        }
-        
-        // printVector(result, n);
-    } 
-    else {
-        // Receive generated matrixes and vectors from process 0  to the other processes
-        MPI_Recv(matrix, n*n, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        MPI_Recv(vector, n, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        
-        // Calculate matrix vector multiplication for other processes' area
-        matrix_vector_multiplication(matrix, vector, result, n, n, n, rank, size);
-        
-        // Send calculated matrix vector multiplication results to process 0
-        MPI_Send(result, n, MPI_DOUBLE, 0, rank * 100 + 1, MPI_COMM_WORLD);
-    }
 }
 
 int main(int argc, char const *argv[]) {
@@ -154,28 +106,78 @@ int main(int argc, char const *argv[]) {
     int n1 = atoi(argv[1]);
     int n2 = atoi(argv[2]);
     
-    // Since I got type error (passed array -double (*)[n1]) (function parameter - double**),
-    // I used 1D array as 2D array. This technique has gotten from Pacheo's examples
-    double matrix1[n1*n1];
-    double matrix2[n2*n2];
-    double vector1[n1], vector2[n2];
-    double result1[n1], result2[n2];
+    double result[n2];
+    
+    int start_row = (int) (rank * (double)n1 / (double)size);  
+    int end_row = (int) ((rank + 1) * (double)n1 / (double)size);
+    int local_num_rows = end_row - start_row + 1;
+    
+    // printf("Rank: %d, [%d, %d)\n", rank, start_row, end_row);
     
     MPI_Barrier( MPI_COMM_WORLD );
-    double start1 = getTime();
-    parallel_matrix_vector_multiplication(matrix1, vector1, result1, n1, rank, size);
-    double finish1 = getTime();
+    double start;
+    if ( rank == 0 ) {
+        // Since I got type error (passed array -double (*)[n1]) (function parameter - double**),
+        // I used 1D array as 2D array. This technique has gotten from Pacheo's examples
+        double *matrix = (double*) malloc(n1*n2*sizeof(double));
+        double *vector = (double*) malloc(n2*sizeof(double));
+        
+        asssign_random_numbers_to_matrix(matrix, n1, n2);
+        asssign_random_numbers_to_vector(vector, n2);
+        
+        start = getTime();
+        
+        // Send generated matrixes and vectors to the other processes
+        for (int i = 1; i < size; i++) {
+            int low = (int) (i * (double)n1 / (double)size);  
+            int high = (int) ((i + 1) * (double)n1 / (double)size);
+            int num_of_elements = (high - low + 1) * n2;
+            // printf("Lİne 133 %d\n", num_of_elements);
+            MPI_Send(&matrix[low], num_of_elements, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
+            MPI_Send(vector, n2, MPI_DOUBLE, i, 1, MPI_COMM_WORLD);
+        }
+;
+        // Calculate matrix vector multiplication for process 0's area
+        matrix_vector_multiplication(matrix, vector, result, local_num_rows, n2, start_row);
+        
+        for (int i = 1; i < size; i++) {
+            double local_result[n2];
+            int low = (int) (i * (double)n1 / (double)size);  
+            int high = (int) ((i + 1) * (double)n1 / (double)size);
+            
+            // Receiving other process' results
+            MPI_Recv(local_result, n2, MPI_DOUBLE, i, i * 100 + 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            // Assigning other process' results to process 0's result
+            for (int i = low; i < high; i++) {
+                result[i] = local_result[i];
+            }
+        }
+        
+        // printVector(result, n1);
+        free(matrix);
+        free(vector);
+    } 
+    else {
+        double matrix[local_num_rows * n2], vector[n2];
+        // Receive generated matrixes and vectors from process 0  to the other processes
+        MPI_Recv(matrix, local_num_rows * n2, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        MPI_Recv(vector, n2, MPI_DOUBLE, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        
+        // Calculate matrix vector multiplication for other processes' area
+        matrix_vector_multiplication(matrix, vector, result, local_num_rows, n2, start_row);
+        
+        // Send calculated matrix vector multiplication results to process 0
+        MPI_Send(result, n2, MPI_DOUBLE, 0, rank * 100 + 1, MPI_COMM_WORLD);
+    }
     
-    MPI_Barrier( MPI_COMM_WORLD );
-    double start2 = getTime();
-    parallel_matrix_vector_multiplication(matrix2, vector2, result2, n2, rank, size);
-    double finish2 = getTime();
+    
+    double finish = getTime();
+    
     
     if ( rank == 0 ) {
-        printf("Elapsed time is %.3f seconds for parallel mx1v1 with %d processes\n", finish1 - start1, size);
-        printf("Elapsed time is %.3f seconds for parallel mx2v2 with %d processes\n", finish2 - start2, size);
-        
-        printFile(argv[3], result1, result2, n1, n2);
+        printf("Elapsed time is %.6f seconds for parallel mxv with %d processes\n", finish - start, size);
+        printFile(argv[3], result, n1, n2);
     }
     
     MPI_Finalize();

@@ -1,4 +1,4 @@
-CC=gcc
+CC=mpicc
 CFLAGS=-I.
 DEPS = 19050111032.h
 OBJ = 19050111032.o hellofunc.o 

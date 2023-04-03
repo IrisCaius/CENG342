@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include </usr/lib/x86_64-linux-gnu/openmpi/include/mpi.h>
+#include <mpi.h>
 #include <sys/time.h>
 
 double getTime() {
